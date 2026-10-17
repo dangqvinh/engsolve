@@ -25,14 +25,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // The role is read from the database (RLS lets a user read only their own profile). This only drives the UI;
   // every admin write is re-checked by RLS / Edge Functions regardless of what this says.
+  const userId = session?.user.id
   useEffect(() => {
     let cancelled = false
     setRoleChecked(false)
-    if (!session) { setIsAdmin(false); return }
-    supabase.from('profiles').select('role').eq('id', session.user.id).maybeSingle()
+    if (!userId) {
+      setIsAdmin(false)
+      setRoleChecked(true)
+      return
+    }
+    supabase.from('profiles').select('role').eq('id', userId).maybeSingle()
       .then(({ data }) => { if (!cancelled) { setIsAdmin(data?.role === 'admin'); setRoleChecked(true) } })
     return () => { cancelled = true }
-  }, [session])
+  }, [userId])
 
   const value: AuthState = {
     session, isAdmin, loading: authLoading || (!!session && !roleChecked),

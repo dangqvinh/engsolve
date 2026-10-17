@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Plus, Sparkles } from 'lucide-react'
 import { Alert, Badge, Button, Card, ConfirmDialog, EmptyState, PageLoading, inputClass } from '../../components/ui'
@@ -13,6 +13,7 @@ import type { AdminQuestion } from '../../types'
 
 type Filter = 'all' | 'needs_review' | 'ai' | 'key' | 'invalid'
 const FILTERS: [Filter, string][] = [['all', 'All'], ['needs_review', 'Needs review'], ['ai', 'AI-suggested'], ['key', 'Answer-key matches'], ['invalid', 'Invalid or incomplete']]
+const GENERATION_STALE_AFTER_MS = 10 * 60 * 1000
 
 const invalid = (q: AdminQuestion) => validateDraftQuestion({
   text: q.question_text, options: q.options.map((o) => ({ text: o.option_text })),
@@ -31,6 +32,15 @@ export default function ReviewPage() {
   const [confirm, setConfirm] = useState<{ kind: 'exercise' } | { kind: 'question'; id: string } | null>(null)
   const [meta, setMeta] = useState<{ title: string; description: string } | null>(null)
   const preview = params.get('preview') === '1'
+  const processingStatus = data?.source?.processing_status
+
+  useEffect(() => {
+    if (processingStatus !== 'generating_answers') return
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void reload()
+    }, 8000)
+    return () => window.clearInterval(timer)
+  }, [processingStatus, reload])
 
   const questions = useMemo(() => data?.questions ?? [], [data])
   const shown = useMemo(() => questions.filter((q) => {
@@ -48,6 +58,9 @@ export default function ReviewPage() {
   if (error) return <Alert>{error}</Alert>
   if (!data) return <EmptyState title="Exercise not found" />
   const { exercise, source } = data
+  const generationStale = source?.processing_status === 'generating_answers'
+    && Date.now() - Date.parse(source.updated_at) > GENERATION_STALE_AFTER_MS
+  const generationRunning = source?.processing_status === 'generating_answers' && !generationStale
   const userId = session?.user.id ?? ''
   const m = meta ?? { title: exercise.title, description: exercise.description ?? '' }
   const unanswered = questions.filter((q) => !q.answer.correct_option_id && q.options.length >= 2).length
@@ -67,6 +80,8 @@ export default function ReviewPage() {
         {source?.processing_status === 'failed' && <Badge tone="danger">Last processing step failed</Badge>}
       </div>
       {source?.processing_error && <div className="mt-3"><Alert tone="warning" title="Processing note">{source.processing_error}</Alert></div>}
+      {generationRunning && <div className="mt-3"><Alert tone="warning" title="Generating answers">This may take a few minutes. The page checks for completion automatically; you can switch tabs and return later.</Alert></div>}
+      {generationStale && <div className="mt-3"><Alert tone="warning" title="Answer generation may have stopped">No completion was recorded for this run. You can retry; answers already generated will be kept.</Alert></div>}
       {msg && <div className="mt-3"><Alert tone={msg.tone}>{msg.text}</Alert></div>}
 
       <Card className="mt-4 space-y-3 p-4">
@@ -78,9 +93,9 @@ export default function ReviewPage() {
             ? <Button variant="secondary" loading={busy === 'pub'} onClick={() => void act('pub', async () => { await setPublished(id, false); return 'Unpublished. Learners can no longer see this exercise.' })}>Unpublish</Button>
             : <Button loading={busy === 'pub'} onClick={() => void act('pub', async () => { await setPublished(id, true); return 'Published. Learners can now practise this exercise.' })}>Publish</Button>}
           <Button variant="secondary" onClick={() => setParams(preview ? {} : { preview: '1' })}>{preview ? 'Back to editing' : 'Preview'}</Button>
-          <Button variant="secondary" disabled={unanswered === 0} loading={busy === 'ai'} onClick={() => void act('ai', async () => {
+          <Button variant="secondary" disabled={unanswered === 0 || generationRunning} loading={busy === 'ai'} onClick={() => void act('ai', async () => {
             const r = await generateAnswers(id); return r.message ?? `Gemini suggested ${r.updated} answer(s)${r.skipped ? `, ${r.skipped} need manual work` : ''}${r.remaining ? `. ${r.remaining} more remain: run it again.` : '.'}` })}>
-            <Sparkles className="h-4 w-4" aria-hidden />{source?.processing_status === 'failed' ? 'Retry suggesting answers' : 'Suggest answers'}{unanswered > 0 ? ` (${unanswered})` : ''}
+            <Sparkles className="h-4 w-4" aria-hidden />{generationRunning ? 'Generating answers…' : source?.processing_status === 'failed' || generationStale ? 'Retry suggesting answers' : 'Suggest answers'}{unanswered > 0 ? ` (${unanswered})` : ''}
           </Button>
           <Button variant="ghost" className="ml-auto text-red-700" onClick={() => setConfirm({ kind: 'exercise' })}>Delete exercise</Button>
         </div>

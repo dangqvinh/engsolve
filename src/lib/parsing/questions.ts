@@ -1,14 +1,16 @@
 import type { ParsedOption, ParsedQuestion } from './types'
 
 const LETTERS = 'ABCDEFGH'
-const OPTION_RE = /^\(?([A-Ha-h])[.)]\s+(\S.*)$/
 const QUESTION_RE = /^(?:(?:question|q|câu)\s*)?(\d{1,3})\s*[.):]\s*(.*)$/i
 const QUESTION_WORD_RE = /^(?:question|q)\s+(\d{1,3})\s*[.):]?\s*(.*)$/i
+const INLINE_OPTION_RE = /(?:\(([A-H])\)|([A-H])[.)]|([A-H])\s*:)(?=\s|:)/gi
+const NON_QUESTION_LINE_RE = /^(?:part\s+\d+\b|section\s+\d+\b|directions?\s*:|instructions?\s*:|questions?\s+\d+\s*(?:-|–|to)\s*\d+\b|choose the (?:best|correct) answer\b|select the (?:best|correct) answer\b|page\s+\d+(?:\s+of\s+\d+)?\b|copyright\b|www\.)/i
 
 export function normalizeText(raw: string): string {
   return raw
     .replace(/\r\n?/g, '\n')
     .replace(/\u00a0/g, ' ')
+    .replace(/(^|\s)[{[]([A-H])[)\]}]/gim, '$1($2)')
     .replace(/[ \t]+/g, ' ')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
@@ -26,6 +28,37 @@ export function parseQuestions(raw: string): ParsedQuestion[] {
   let lastNumber = 0
   let sawBlank = false
 
+  const appendText = (text: string) => {
+    if (!cur || !text.trim() || NON_QUESTION_LINE_RE.test(text.trim())) return
+    const value = text.trim()
+    if (cur.options.length > 0) {
+      const last = cur.options[cur.options.length - 1]
+      last.text = `${last.text} ${value}`.trim()
+    } else {
+      cur.text = `${cur.text} ${value}`.trim()
+    }
+  }
+
+  const appendContent = (text: string) => {
+    if (!cur) return
+    let cursor = 0
+    let match: RegExpExecArray | null
+    let foundOption = false
+    INLINE_OPTION_RE.lastIndex = 0
+    while ((match = INLINE_OPTION_RE.exec(text)) !== null) {
+      const expected = LETTERS[cur.options.length]
+      const label = (match[1] ?? match[2] ?? match[3])?.toUpperCase()
+      if (label !== expected) continue
+      appendText(text.slice(cursor, match.index))
+      cur.options.push({ label: expected, text: '' })
+      if (text[INLINE_OPTION_RE.lastIndex] === ':') INLINE_OPTION_RE.lastIndex++
+      while (/\s/.test(text[INLINE_OPTION_RE.lastIndex] ?? '')) INLINE_OPTION_RE.lastIndex++
+      cursor = INLINE_OPTION_RE.lastIndex
+      foundOption = true
+    }
+    appendText(foundOption ? text.slice(cursor) : text)
+  }
+
   const finish = () => {
     if (cur) out.push(finalize(cur))
     cur = null
@@ -38,53 +71,30 @@ export function parseQuestions(raw: string): ParsedQuestion[] {
       continue
     }
 
-    // 1) A new choice?
-    const om = t.match(OPTION_RE)
-    if (cur && om) {
-      const expected = LETTERS[cur.options.length]
-      if (om[1].toUpperCase() === expected) {
-        cur.options.push({ label: expected, text: om[2].trim() })
-        sawBlank = false
-        continue
-      }
-    }
-
-    // 2) A new numbered question?
+    // A new numbered question starts a fresh question, even when its choices follow inline.
     const qm = t.match(QUESTION_WORD_RE) ?? t.match(QUESTION_RE)
-    if (qm && !om) {
+    if (qm) {
       const n = Number(qm[1])
       const plausible = !cur || n === lastNumber + 1 || cur.options.length >= 2
       if (plausible) {
         finish()
         lastNumber = n
-        cur = { number: n, text: qm[2].trim(), options: [], warnings: [] }
+        cur = { number: n, text: '', options: [], warnings: [] }
+        appendContent(qm[2])
         sawBlank = false
         continue
       }
     }
 
-    // 3) Unnumbered question: a paragraph break after a complete question.
-    if (cur && cur.options.length >= 2 && sawBlank && !om) {
+    // A paragraph break after a complete question can introduce an unnumbered question.
+    if (cur && cur.options.length >= 2 && sawBlank) {
       finish()
       cur = { number: null, text: t, options: [], warnings: ['No question number found'] }
       sawBlank = false
       continue
     }
 
-    // 4) Otherwise it is a continuation line.
-    if (!cur) {
-      if (!om) {
-        cur = { number: null, text: t, options: [], warnings: ['No question number found'] }
-      }
-      sawBlank = false
-      continue
-    }
-    if (cur.options.length > 0) {
-      const last = cur.options[cur.options.length - 1]
-      last.text = `${last.text} ${t}`.trim()
-    } else {
-      cur.text = `${cur.text} ${t}`.trim()
-    }
+    appendContent(t)
     sawBlank = false
   }
   finish()

@@ -5,7 +5,7 @@ import { Alert, Button, Card, inputClass } from '../../components/ui'
 import { useAuth } from '../../features/auth/AuthProvider'
 import { sha256, validatePdf } from '../../lib/files'
 import { errorMessage } from '../../lib/errors'
-import { matchAnswerKey, parseAnswerKey, parseQuestions, splitAnswerKey } from '../../lib/parsing'
+import { matchAnswerKey, MAX_OPTION_TEXT_LENGTH, MAX_QUESTION_TEXT_LENGTH, parseAnswerKey, parseQuestions, splitAnswerKey } from '../../lib/parsing'
 import { extractPdfText } from '../../lib/pdf/extract'
 import { ocrPdf } from '../../lib/pdf/ocr'
 import { createExerciseFromParsed, findByHash, generateAnswers, uploadSourcePdf } from '../../services/admin'
@@ -76,19 +76,38 @@ export default function UploadPage() {
       const match = keySource && keyText ? matchAnswerKey(parsed, parseAnswerKey(keyText)) : null
       if (parsed.length === 0) warnings.push('No questions were detected. Add them manually on the review page.')
       if (match?.uncertain) warnings.push(...match.notes)
+      const importable = parsed
+        .map((question, index) => ({ question, index }))
+        .filter(({ question }) =>
+          question.text.length <= MAX_QUESTION_TEXT_LENGTH
+          && question.options.every((option) => option.text.length <= MAX_OPTION_TEXT_LENGTH))
+      const skipped = parsed.length - importable.length
+      if (skipped > 0) {
+        for (const { question, index } of parsed.map((question, index) => ({ question, index })).filter(({ question }) =>
+          question.text.length > MAX_QUESTION_TEXT_LENGTH
+          || question.options.some((option) => option.text.length > MAX_OPTION_TEXT_LENGTH))) {
+          const label = question.number === null ? `Extracted question ${index + 1}` : `Question ${question.number}`
+          const reason = question.text.length > MAX_QUESTION_TEXT_LENGTH
+            ? `question text exceeds ${MAX_QUESTION_TEXT_LENGTH} characters`
+            : `a choice exceeds ${MAX_OPTION_TEXT_LENGTH} characters`
+          warnings.push(`${label} was not imported because ${reason}. The extracted PDF text is retained with the draft; split or correct the question and add it manually.`)
+        }
+      }
+      const importableQuestions = importable.map(({ question }) => question)
+      const importableKeyLabels = match ? importable.map(({ index }) => match.labels[index]) : null
 
       setStep(3); setDetail('')
       const keyNotes = match?.uncertain ? ['Answer-key mapping is uncertain. Verify this answer.'] : []
       const exerciseId = await createExerciseFromParsed({
-        title: title.trim() || file.name.replace(/\.pdf$/i, ''), description: description.trim(), userId: session.user.id, parsed,
-        keyLabels: match?.labels ?? null, keySource, keyNotes, extractedText: main.text, keyText,
+        title: title.trim() || file.name.replace(/\.pdf$/i, ''), description: description.trim(), userId: session.user.id, parsed: importableQuestions,
+        keyLabels: importableKeyLabels, keySource, keyNotes, extractedText: main.text, keyText,
         fileHash: hash, ocrUsed: main.ocr || keyOcr, metadata: { pages_note: 'extracted in browser', file_name: file.name },
       })
       await uploadSourcePdf(session.user.id, exerciseId, file, 'source')
       if (keyFile) await uploadSourcePdf(session.user.id, exerciseId, keyFile, 'answer-key')
 
-      const fromKey = match?.labels.filter(Boolean).length ?? 0
-      const needAi = parsed.filter((q, i) => q.options.length >= 2 && !match?.labels[i]).length
+      const fromKey = importableKeyLabels?.filter(Boolean).length ?? 0
+      const needAi = importableQuestions.filter((q, i) => q.options.length >= 2 && !importableKeyLabels?.[i]).length
       let ai: string | null = null; let aiError: string | null = null
       if (useAi && needAi > 0) {
         setStep(4); setDetail('Asking Gemini…')
@@ -97,7 +116,7 @@ export default function UploadPage() {
           ai = `Gemini suggested ${r.updated} answer(s)${r.skipped ? `; ${r.skipped} could not be answered` : ''}${r.remaining ? `; ${r.remaining} more remain, press “Suggest answers” on the review page` : ''}.`
         } catch (e) { aiError = errorMessage(e) } // extracted data is already saved; admin can retry or edit manually
       }
-      setSummary({ exerciseId, questions: parsed.length, fromKey, flagged: parsed.filter((q) => q.warnings.length).length, warnings, ai, aiError })
+      setSummary({ exerciseId, questions: importableQuestions.length, fromKey, flagged: importableQuestions.filter((q) => q.warnings.length).length, warnings, ai, aiError })
       setStep(STEPS.length)
     } catch (e) {
       setError(errorMessage(e)); setStep(-1)

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { ArrowDown, ArrowUp, CheckCircle2, Plus, Trash2, X } from 'lucide-react'
 import { Alert, Badge, Button, Card, inputClass } from '../../components/ui'
 import { errorMessage } from '../../lib/errors'
-import { validateDraftQuestion } from '../../lib/parsing'
+import { MAX_OPTION_TEXT_LENGTH, MAX_QUESTION_TEXT_LENGTH, validateDraftQuestion } from '../../lib/parsing'
 import { saveQuestion, type QuestionDraft } from '../../services/admin'
 import type { AdminQuestion, AnswerSource } from '../../types'
 
@@ -63,7 +63,7 @@ export function QuestionEditor({ question, index, count, userId, onSaved, onMove
       )}
 
       <label className="mt-3 block text-sm font-medium">Question text
-        <textarea className={`${inputClass} mt-1`} rows={2} value={draft.text} onChange={(e) => setDraft({ ...draft, text: e.target.value })} />
+        <textarea className={`${inputClass} mt-1`} rows={2} maxLength={MAX_QUESTION_TEXT_LENGTH} value={draft.text} onChange={(e) => setDraft({ ...draft, text: e.target.value })} />
       </label>
 
       <fieldset className="mt-3">
@@ -73,7 +73,7 @@ export function QuestionEditor({ question, index, count, userId, onSaved, onMove
             <div key={o.id ?? `new-${i}`} className="flex items-center gap-2">
               <input type="radio" name={`correct-${question.id}`} checked={draft.correctIndex === i} onChange={() => setDraft({ ...draft, correctIndex: i })} aria-label={`Mark choice ${'ABCDEFGH'[i]} as correct`} />
               <span className="w-5 text-sm font-bold">{'ABCDEFGH'[i]}</span>
-              <input className={inputClass} value={o.text} aria-label={`Choice ${'ABCDEFGH'[i]}`} onChange={(e) => setOption(i, e.target.value)} />
+              <input className={inputClass} value={o.text} maxLength={MAX_OPTION_TEXT_LENGTH} aria-label={`Choice ${'ABCDEFGH'[i]}`} onChange={(e) => setOption(i, e.target.value)} />
               <Button variant="ghost" className="px-2 py-1" onClick={() => removeOption(i)}><X className="h-4 w-4" aria-hidden /><span className="sr-only">Remove choice {'ABCDEFGH'[i]}</span></Button>
             </div>
           ))}

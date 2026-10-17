@@ -54,6 +54,52 @@ describe('parseQuestions', () => {
     const r = parseQuestions('1.\u00a0Hi\r\nA. a\r\nB. b')
     expect(r[0].options).toHaveLength(2)
   })
+  it('splits OCR output when the stem and choices are on one line', () => {
+    const r = parseQuestions(
+      'Part 5: Choose the correct answer.\n101. Diners at the Appleton Buffet have commented favorably on ------- wide variety of seafood dishes. (A) we (B) us (C) our (D) ours\nPage 12',
+    )
+    expect(r).toHaveLength(1)
+    expect(r[0].number).toBe(101)
+    expect(r[0].text).toBe('Diners at the Appleton Buffet have commented favorably on ------- wide variety of seafood dishes.')
+    expect(r[0].options).toEqual([
+      { label: 'A', text: 'we' },
+      { label: 'B', text: 'us' },
+      { label: 'C', text: 'our' },
+      { label: 'D', text: 'ours' },
+    ])
+  })
+  it('parses numbered questions with colon-delimited parenthesized choices', () => {
+    const r = parseQuestions(
+      '101. Diners at the Appleton Buffet have commented favorably on ------- wide variety of seafood dishes.\n(A): we\n(B): us\n(C): our\n(D): ours\n102. Rev Furniture has high-quality handmade goods and reasonable delivery -------.\n(A): routines\n(B): trucks\n(C): duties\n(D): fees',
+    )
+    expect(r).toHaveLength(2)
+    expect(r.map((question) => question.number)).toEqual([101, 102])
+    expect(r[0].text).toBe('Diners at the Appleton Buffet have commented favorably on ------- wide variety of seafood dishes.')
+    expect(r[0].options).toEqual([
+      { label: 'A', text: 'we' },
+      { label: 'B', text: 'us' },
+      { label: 'C', text: 'our' },
+      { label: 'D', text: 'ours' },
+    ])
+    expect(r[1].text).toBe('Rev Furniture has high-quality handmade goods and reasonable delivery -------.')
+    expect(r[1].options.map((option) => option.text)).toEqual(['routines', 'trucks', 'duties', 'fees'])
+  })
+  it('normalizes OCR bracket errors around choice labels', () => {
+    const r = parseQuestions('101. Select the answer.\n{A) one\n(B) two\n{C) three\n(D) four')
+    expect(r[0].options).toEqual([
+      { label: 'A', text: 'one' },
+      { label: 'B', text: 'two' },
+      { label: 'C', text: 'three' },
+      { label: 'D', text: 'four' },
+    ])
+  })
+  it('drops instruction lines rather than attaching them to a question or choice', () => {
+    const r = parseQuestions(
+      'Directions: Choose the best answer.\n1. Choose the correct answer.\nDiners commented favorably.\n(A) we\n(B) us\n(C) our\n(D) ours',
+    )
+    expect(r[0].text).toBe('Diners commented favorably.')
+    expect(r[0].options[3].text).toBe('ours')
+  })
 })
 
 describe('answer key', () => {
@@ -87,5 +133,19 @@ describe('validateDraftQuestion', () => {
     expect(validateDraftQuestion({ text: '', options: [{ text: 'a' }], correctIndex: null })).toHaveLength(3)
     expect(validateDraftQuestion({ text: 'q', options: [{ text: 'a' }, { text: 'b' }], correctIndex: 1 })).toEqual([])
     expect(validateDraftQuestion({ text: 'q', options: [{ text: 'a' }, { text: ' ' }], correctIndex: 0 })).toEqual(['A choice is empty'])
+  })
+  it('rejects question text longer than the database limit', () => {
+    expect(validateDraftQuestion({
+      text: 'q'.repeat(4001),
+      options: [{ text: 'a' }, { text: 'b' }],
+      correctIndex: 0,
+    })).toContain('Question text exceeds 4000 characters')
+  })
+  it('rejects choices longer than the database limit', () => {
+    expect(validateDraftQuestion({
+      text: 'question',
+      options: [{ text: 'a'.repeat(1001) }, { text: 'b' }],
+      correctIndex: 0,
+    })).toContain('A choice exceeds 1000 characters')
   })
 })

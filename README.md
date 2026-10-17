@@ -8,7 +8,7 @@ An administrator uploads English multiple-choice PDFs. EngSolve extracts questio
 
 | Step | Where it runs |
 |---|---|
-| PDF text extraction (pdf.js) and OCR fallback (Tesseract.js) | Admin's browser. Edge Functions have tight CPU/memory limits, so heavy PDF work stays client-side. |
+| PDF text extraction (pdf.js) and OCR fallback (Tesseract.js, with repeated-band and mixed-layout column detection) | Admin's browser. Edge Functions have tight CPU/memory limits, so heavy PDF work stays client-side. |
 | Question/answer-key parsing | Browser, deterministic (`src/lib/parsing`). Uncertain items are flagged, never guessed. |
 | Gemini answer suggestions | Edge Function `generate-answers` (admin only). |
 | Publish checks | Edge Function `publish-exercise` (admin only). |

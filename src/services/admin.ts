@@ -47,7 +47,7 @@ export async function listAdminExercises(limit?: number): Promise<AdminExerciseR
 
 export interface AdminExerciseDetail {
   exercise: Exercise
-  source: { processing_status: ProcessingStatus; processing_error: string | null; ocr_used: boolean; original_extracted_text: string | null; metadata: Record<string, unknown> } | null
+  source: { processing_status: ProcessingStatus; processing_error: string | null; updated_at: string; ocr_used: boolean; original_extracted_text: string | null; metadata: Record<string, unknown> } | null
   questions: AdminQuestion[]
 }
 
@@ -55,7 +55,7 @@ export async function getAdminExercise(id: string): Promise<AdminExerciseDetail 
   const exercise = ok(await supabase.from('exercises').select('*').eq('id', id).maybeSingle()) as Exercise | null
   if (!exercise) return null
   const source = ok(await supabase.from('exercise_sources')
-    .select('processing_status,processing_error,ocr_used,original_extracted_text,metadata').eq('exercise_id', id).maybeSingle()) as AdminExerciseDetail['source']
+    .select('processing_status,processing_error,updated_at,ocr_used,original_extracted_text,metadata').eq('exercise_id', id).maybeSingle()) as AdminExerciseDetail['source']
   const rows = ok(await supabase.from('questions')
     .select('id,question_text,question_order,options:question_options(id,option_label,option_text,option_order),answer:question_answers(correct_option_id,explanation,answer_source,ai_confidence,needs_review,validation_notes)')
     .eq('exercise_id', id).order('question_order')) as unknown as (Omit<AdminQuestion, 'answer'> & { answer: QuestionAnswer | QuestionAnswer[] | null })[]
