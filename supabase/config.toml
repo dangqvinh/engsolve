@@ -1,0 +1,14 @@
+project_id = "engsolve"
+
+# Functions called by anonymous learners cannot require a Supabase JWT.
+# They authenticate with a per-attempt secret instead. Admin functions verify the JWT + role in code.
+[functions.start-attempt]
+verify_jwt = false
+[functions.submit-answer]
+verify_jwt = false
+[functions.complete-attempt]
+verify_jwt = false
+[functions.publish-exercise]
+verify_jwt = false
+[functions.generate-answers]
+verify_jwt = false
